@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Проверка ошибки сохранения</title>
+<aside style="padding:20px;background:#fff2d7">Локальная проверка настоящей формы с контролируемым сетевым адаптером. Первый запрос завершается ошибкой, повторный — успешно. Данные в Supabase не отправляются. <strong id="attempts">Запросов сохранения: 0</strong></aside>
+<div id="test-root"></div>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { Workspace } from '../src/main.jsx';
+let attempts = 0;
+const testClient = {
+  from() {
+    return {
+      select() { return { order: async () => ({ data: [], error: null }) }; },
+      insert(fields) {
+        attempts++;
+        document.querySelector('#attempts').textContent = `Запросов сохранения: ${attempts}`;
+        const requestNumber = attempts;
+        return { select() { return { single: async () => {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          if (requestNumber === 1) throw new TypeError('Failed to fetch');
+          return { data: { ...fields, status: 'Новая', created_at: new Date().toISOString() }, error: null };
+        } }; } };
+      }
+    };
+  },
+  auth: { signOut: async () => ({ error: null }) }
+};
+createRoot(document.querySelector('#test-root')).render(React.createElement(Workspace, {
+  user: { id: '00000000-0000-4000-a000-000000000001', email: 'local-test@example.com' },
+  client: testClient
+}));
+</script></html>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Проверка RLS · LD LATTE</title>
+<style>body{font:16px system-ui;max-width:800px;margin:40px auto;padding:20px;line-height:1.6}button{padding:12px;margin:8px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f0;padding:20px}</style>
+<h1>Проверка RLS обычным клиентом</h1>
+<p>Локальный проверочный инструмент. Использует текущую сессию приложения, без административного ключа. В production-сборку не входит.</p>
+<p id="account">Проверка входа…</p>
+<button id="remember">Запомнить заявку A</button><button id="check-b">Проверить доступ B</button><button id="check-a">Проверить сохранность A</button>
+<pre id="result" role="status"></pre>
+<script type="module">
+import { createClient } from '@supabase/supabase-js';
+const url = import.meta.env.VITE_SUPABASE_URL;
+const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const client = createClient(url, key);
+const output = document.querySelector('#result');
+const account = document.querySelector('#account');
+const baselineKey = 'ld-latte-rls-test-baseline';
+function assert(condition, message) { if (!condition) throw new Error(message); }
+async function user() {
+  const { data, error } = await client.auth.getUser();
+  if (error) throw error;
+  assert(data.user, 'Сначала войдите в приложение');
+  account.textContent = `Текущий пользователь: ${data.user.email}`;
+  return data.user;
+}
+function baseline() {
+  const value = JSON.parse(localStorage.getItem(baselineKey) || 'null');
+  assert(value, 'Сначала сохраните исходную заявку под аккаунтом A');
+  return value;
+}
+async function run(action) {
+  const buttons = [...document.querySelectorAll('button')];
+  buttons.forEach(button => button.disabled = true); output.textContent = 'Проверяем…';
+  try { await action(); } catch (error) { output.textContent += `\nFAIL: ${error.message}`; }
+  finally { buttons.forEach(button => button.disabled = false); }
+}
+document.querySelector('#remember').onclick = () => run(async () => {
+  const current = await user();
+  const { data, error } = await client.from('requests').select('id,user_id,title,description,category,status').order('created_at').limit(1).single();
+  if (error) throw error;
+  assert(data.user_id === current.id, 'Заявка принадлежит другому пользователю');
+  localStorage.setItem(baselineKey, JSON.stringify(data));
+  output.textContent = `BASELINE SAVED\n${JSON.stringify(data, null, 2)}`;
+});
+document.querySelector('#check-b').onclick = () => run(async () => {
+  const current = await user(); const a = baseline();
+  assert(current.id !== a.user_id, 'Войдите вторым пользователем B');
+  const read = await client.from('requests').select('*').eq('id', a.id);
+  assert(!read.error && read.data.length === 0, 'B получил заявку A');
+  const update = await client.from('requests').update({ title: 'Unauthorized B edit' }).eq('id', a.id).select();
+  assert(!update.error && update.data.length === 0, 'B изменил заявку A');
+  const fields = { title: 'RLS — тестовая заявка B', description: 'Проверка обычного клиента Supabase', category: 'Бот' };
+  const forged = await client.from('requests').insert({ ...fields, user_id: a.user_id });
+  assert(forged.error, 'Разрешена подмена владельца');
+  const initial = await client.from('requests').insert({ ...fields, user_id: current.id, status: 'В работе' });
+  assert(initial.error, 'Разрешён иной начальный статус');
+  const invalid = await client.from('requests').insert({ ...fields, user_id: current.id, category: 'Несуществующая' });
+  assert(invalid.error, 'Принята недопустимая категория');
+  const own = await client.from('requests').insert({ ...fields, user_id: current.id }).select().single();
+  if (own.error) throw own.error;
+  assert(own.data.status === 'Новая', 'Неверный начальный статус');
+  const transfer = await client.from('requests').update({ user_id: a.user_id }).eq('id', own.data.id);
+  assert(transfer.error, 'Разрешена передача владельца');
+  const ownEdit = await client.from('requests').update({ status: 'В работе' }).eq('id', own.data.id).select().single();
+  assert(!ownEdit.error && ownEdit.data.status === 'В работе', 'Не работает изменение своей заявки');
+  const anonymous = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  const anonRead = await anonymous.from('requests').select('*').eq('id', a.id);
+  assert(anonRead.error || anonRead.data.length === 0, 'Разрешён анонимный доступ');
+  output.textContent = `PASS\nB не получает и не изменяет заявку A.\nПодмена владельца при создании запрещена.\nПередача владельца при обновлении запрещена.\nНачальный статус закреплён.\nНедопустимая категория отклонена.\nСоздание и изменение собственной заявки B работают.\nАнонимный доступ закрыт.\nID тестовой заявки B: ${own.data.id}`;
+});
+document.querySelector('#check-a').onclick = () => run(async () => {
+  const current = await user(); const a = baseline();
+  assert(current.id === a.user_id, 'Войдите снова под аккаунтом A');
+  const { data, error } = await client.from('requests').select('id,user_id,title,description,category,status').eq('id', a.id).single();
+  if (error) throw error;
+  for (const field of Object.keys(a)) assert(data[field] === a[field], `Изменено поле ${field}`);
+  output.textContent = `PASS\nПосле повторного входа A видит исходную заявку.\nВсе проверяемые поля сохранились, B их не изменил.\nID: ${a.id}`;
+});
+user().catch(error => { account.textContent = error.message; });
+</script></html>
