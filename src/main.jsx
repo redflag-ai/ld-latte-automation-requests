@@ -35,9 +35,9 @@ function Auth() {
     finally { lock.current = false; setBusy(false); }
   }
   return <main className="auth-layout">
-    <section className="intro"><span className="eyebrow">LD LATTE · ВНУТРЕННИЙ ИНСТРУМЕНТ</span>
+    <section className="intro"><span className="eyebrow">LD LATTE</span>
       <h1>Меньше рутины.{' '}<br />Больше времени{' '}<br />на приоритеты.</h1>
-      <p>Заявки на автоматизацию в одном месте. Опишите задачу, следите за статусом и возвращайтесь к деталям.</p>
+      <p>Заявки на автоматизацию в одном месте.<br />Опишите задачу, следите за статусом и возвращайтесь к деталям.</p>
       <span className="intro-note">Ваши заявки доступны только вам.</span>
     </section>
     <section className="auth-card"><span className="eyebrow">ЗАЯВКИ НА АВТОМАТИЗАЦИЮ</span>
